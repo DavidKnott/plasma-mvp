@@ -22,8 +22,7 @@ class ChildChainService(object):
             "jsonrpc": "2.0",
             "id": 0,
         }
-        response = requests.post(self.url, data=json.dumps(payload),
-                                 headers=headers).json()
+        response = requests.post(self.url, data=payload).json()
         return response["result"]
 
     def submit_deposit(self, tx_hash):

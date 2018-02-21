@@ -20,12 +20,8 @@ def start_client_cmd(ctx):
 
 class ClientParser():
 
-    def __init__(self):
-        self.client = Client()
-        self.db = plyvel.DB('/tmp/plasma_mvp_db/', create_if_missing=True)
-        self.current_block = self.client.get_current_block_num()
-        self.synced_block = 1
-        self.client_cmds = dict(
+    synced_block = 1
+    client_cmds = dict(
             sync=self.sync_child_chain,
             deposit=self.deposit,
             send_tx=self.send_tx,
@@ -34,13 +30,18 @@ class ClientParser():
             help=self.help,
         )
 
+    def __init__(self):
+        self.client = Client()
+        self.db = plyvel.DB('/tmp/plasma_mvp_db/', create_if_missing=True)
+        self.current_block = self.client.get_current_block_num()
+
     def process_input(self, inp):
         self.inp = inp
         command = self.inp[0]
-        if command not in self.client_cmds:
+        if command not in client_cmds:
             print("Please enter a valid command ('or enter help')")
         else:
-            return self.client_cmds[command]()
+            return client_cmds[command]()
 
     def sync_child_chain(self):
         self.current_block = self.client.get_current_block_num()
@@ -77,9 +78,7 @@ class ClientParser():
         amount2 = int(self.inp[10])
         fee = int(self.inp[11])
         key1 = utils.normalize_key(self.inp[12])
-        key2 = b''
-        if len(self.inp) == 14:
-            key2 = utils.normalize_key(self.inp[13])
+        key2 = utils.normalize_key(self.inp[13]) if len(self.inp) == 14 else b''
         tx = Transaction(blknum1, tx_pos1, utxo_pos1,
                          blknum2, tx_pos2, utxo_pos2,
                          newowner1, amount1,
@@ -106,9 +105,7 @@ class ClientParser():
         blknum, txindex, oindex = int(self.inp[1]), int(self.inp[2]), int(self.inp[3])
         txPos = [blknum, txindex, oindex]
         key1 = utils.normalize_key(self.inp[4])
-        key2 = b''
-        if len(self.inp) == 6:
-            key2 = utils.normalize_key(self.inp[5])
+        key2 = utils.normalize_key(self.inp[5]) if len(self.inp) == 6 else b''
         block = self.client.get_block(blknum)
         block = rlp.decode(utils.decode_hex(block), Block)
         tx = block.transaction_set[txindex]
