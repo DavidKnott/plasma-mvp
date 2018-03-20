@@ -1,6 +1,5 @@
 pragma solidity 0.4.18;
 import 'SafeMath.sol';
-import 'Math.sol';
 import 'RLP.sol';
 import 'Merkle.sol';
 import 'Validate.sol';
@@ -42,7 +41,6 @@ contract RootChain {
     */
     uint256 public currentChildBlock; /* ends with 000 */
     uint256 public currentDepositBlock; /* takes values in range 1..999 */
-    uint256 public recentBlock;
     uint256 public weekOldBlock;
     uint256 public childBlockInterval;
 
