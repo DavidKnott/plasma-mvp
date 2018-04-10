@@ -200,7 +200,10 @@ contract RootChain {
         exit memory currentExit = exits[utxoPos];
         while (created_at < twoWeekOldTimestamp && exitsQueue.currentSize() > 0) {
             currentExit = exits[utxoPos];
-            currentExit.owner.transfer(currentExit.amount);
+            // Using send so that the contract will continue to process exits
+            // even if `owner` is the address of a contract that throws
+            // when receiving Eth
+            currentExit.owner.send(currentExit.amount)
             exitsQueue.delMin();
             delete exits[utxoPos].owner;
             (utxoPos, created_at) = getNextExit();
