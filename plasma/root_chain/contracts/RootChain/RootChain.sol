@@ -31,6 +31,7 @@ contract RootChain {
      */
     mapping(uint256 => childBlock) public childChain;
     mapping(uint256 => exit) public exits;
+    mapping(uint256 => bytes32) public efs;
     PriorityQueue exitsQueue;
     address public authority;
     /* Block numbering scheme below is needed to prevent Ethereum reorg from invalidating blocks submitted
@@ -43,9 +44,22 @@ contract RootChain {
     uint256 public currentDepositBlock; /* takes values in range 1..999 */
     uint256 public childBlockInterval;
 
+    /*
+     * Exit Statuses
+     * 0 - Finalized
+     * 1 - Unproven
+     * 2 - Challenged
+     * 3 - ChallengeWon
+     * 4 - Proven
+     */
+
     struct exit {
         address owner;
         uint256 amount;
+        uint256 status;
+        uint256 bond;
+        uint256 created_at;
+        address challenger;
     }
 
     struct childBlock {
@@ -115,7 +129,51 @@ contract RootChain {
         bytes32 root = childChain[blknum].root;
         bytes32 depositHash = keccak256(msg.sender, amount);
         require(root == depositHash);
-        addExitToQueue(depositPos, msg.sender, amount);
+        addExitToQueue(depositPos, msg.sender, amount, 4);
+    }
+
+    function startCheapExit(uint256 utxoPos, uint256 amount)
+        public
+        payable
+    {
+        require(msg.value == 100000 * 20);
+        addExitToQueue(utxoPos, msg.sender, amount, 2);
+        exits[utxoPos].bond += msg.value;
+    }
+
+    function challengeExitValidity(uint256 utxoPos)
+        public
+    {
+        // Check that the exit is unproven
+        require(exits[utxoPos].status == 1);
+        // This bond must cover the cost of the response to avoid griefing
+        require(msg.value == 100000 * 20);
+        // Need to check timing
+
+        exits[utxoPos].status = 2;
+        exits[utxoPos].challenger = msg.sender;
+        // Collect a bond from the challenger
+        exits[utxoPos].bond += msg.value;
+    }
+
+    function proveExitValidity(uint256 utxoPos, bytes txBytes, bytes proof, bytes sigs)
+        public
+        payable
+    {
+        require(exits[utxoPos].status == 2);
+        var txList = txBytes.toRLPItem().toList(11); 
+        uint256 blknum = utxoPos / 1000000000;
+        uint256 txindex = (utxoPos % 1000000000) / 10000;
+        uint256 oindex = utxoPos - blknum * 1000000000 - txindex * 10000; 
+        uint256 amount = txList[7 + 2 * oindex].toUint();
+        address exitor = txList[6 + 2 * oindex].toAddress(); 
+
+        require(msg.sender == exitor);
+        bytes32 root = childChain[blknum].root; 
+        bytes32 merkleHash = keccak256(keccak256(txBytes), ByteUtils.slice(sigs, 0, 130));
+        require(Validate.checkSigs(keccak256(txBytes), root, txList[0].toUint(), txList[3].toUint(), sigs));
+        require(merkleHash.checkMembership(txindex, root, proof));
+        exits[utxoPos].status = 3;
     }
 
     // @dev Starts to exit a specified utxo
@@ -132,29 +190,34 @@ contract RootChain {
         uint256 oindex = utxoPos - blknum * 1000000000 - txindex * 10000; 
         uint256 amount = txList[7 + 2 * oindex].toUint();
         address exitor = txList[6 + 2 * oindex].toAddress(); 
-        
+
         require(msg.sender == exitor);
         bytes32 root = childChain[blknum].root; 
         bytes32 merkleHash = keccak256(keccak256(txBytes), ByteUtils.slice(sigs, 0, 130));
         require(Validate.checkSigs(keccak256(txBytes), root, txList[0].toUint(), txList[3].toUint(), sigs));
         require(merkleHash.checkMembership(txindex, root, proof));
-        addExitToQueue(utxoPos, exitor, amount);
+        addExitToQueue(utxoPos, exitor, amount, 4);
     }
 
     // Priority is a given utxos position in the exit priority queue
-    function addExitToQueue(uint256 utxoPos, address exitor, uint256 amount)
+    function addExitToQueue(uint256 utxoPos, address exitor, uint256 amount, uint256 status)
         private
     {
         uint256 blknum = utxoPos / 1000000000;
-        uint256 priority = Math.max(childChain[blknum].created_at, block.timestamp - 1 weeks);
-        priority = priority << 128 | utxoPos;
+        uint256 created_at = Math.max(childChain[blknum].created_at, block.timestamp - 1 weeks);
+        uint256 priority = priority << 128 | utxoPos;
         require(amount > 0);
         require(exits[utxoPos].amount == 0);
         exitsQueue.insert(priority);
-        exits[utxoPos] = exit({
-            owner: exitor,
-            amount: amount
-        });
+        efs[utxoPos] = keccak256(exitor, amount, status, 0, created_at, address(0));
+        // exits[utxoPos] = exit({
+        //     owner: exitor,
+        //     amount: amount,
+        //     status: status,
+        //     bond: 0,
+        //     created_at: created_at,
+        //     challenger: address(0)
+        // });
         Exit(exitor, utxoPos);
     }
 
@@ -191,10 +254,14 @@ contract RootChain {
         uint256 utxoPos;
         uint256 created_at;
         (utxoPos, created_at) = getNextExit();
-        exit memory currentExit = exits[utxoPos];
+        exit memory currentExit;
         while (created_at < twoWeekOldTimestamp) {
             currentExit = exits[utxoPos];
-            currentExit.owner.transfer(currentExit.amount);
+            if (currentExit.status == 2 || currentExit.status == 4) {
+                currentExit.owner.transfer(currentExit.amount + currentExit.bond);
+            } else if (currentExit.status == 3){
+                currentExit.challenger.transfer(currentExit.bond);
+            }
             exitsQueue.delMin();
             delete exits[utxoPos].owner;
 

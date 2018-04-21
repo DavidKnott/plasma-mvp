@@ -43,6 +43,31 @@ def test_start_deposit_exit(t, u, root_chain, assert_tx_failed):
     # Fails if value given is not equal to deposited value
     assert_tx_failed(lambda: root_chain.startDepositExit(utxo_pos, value_1 + 1))
 
+def test_start_cheap_exit(t, root_chain):
+    owner, value_1, key = t.a1, 100, t.k1
+    null_address = b'\x00' * 20
+    # Deposit once to make sure everything works for deposit block
+    dep_blknum = root_chain.getDepositBlock()
+    root_chain.deposit(value=value_1)
+    tx2 = Transaction(dep_blknum, 0, 0, 0, 0, 0,
+                      owner, value_1, null_address, 0, 0)
+    tx2.sign1(key)
+    tx_bytes2 = rlp.encode(tx2, UnsignedTransaction)
+    merkle = FixedMerkle(16, [tx2.merkle_hash], True)
+    proof = merkle.create_membership_proof(tx2.merkle_hash)
+    child_blknum = root_chain.currentChildBlock()
+    assert child_blknum == 1000
+    root_chain.submitBlock(merkle.root)
+    confirmSig1 = confirm_tx(tx2, root_chain.getChildChain(child_blknum)[0], key)
+    priority2 = child_blknum * 1000000000 + 10000 * 0 + 0
+    sigs = tx2.sig1 + tx2.sig2 + confirmSig1
+    snapshot = t.chain.snapshot()
+    # # Single input exit
+    utxo_pos2 = child_blknum * 1000000000 + 10000 * 0 + 0
+    # root_chain.startCheapExit(utxo_pos2, value_1, value=100000 * 20, sender=key)
+    root_chain.startExit(utxo_pos2, tx_bytes2, proof, sigs, sender=key)
+    import pdb; pdb.set_trace()
+
 
 def test_start_exit(t, root_chain, assert_tx_failed):
     week_and_a_half = 60 * 60 * 24 * 13
